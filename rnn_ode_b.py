@@ -7,32 +7,33 @@ import matplotlib.pyplot as plot
 
 class ODE_RNN(nn.Module):
 
-    def __init__(self, steps, h):
+    def __init__(self, steps, input_size, hidden_size):
         super().__init__()
         self.steps = steps
-        self.h = h
 
-        self.weights = nn.Parameter(
-            torch.tensor([0.1, 0.1, 0.001, 0.001, 0.001, 0.001], dtype=torch.float32)
-            , requires_grad=True)
+        self.d_f = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.SELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.SELU(),
+            nn.Linear(hidden_size, input_size)
+        )
 
     def step_do(self, state):
         x = state
-        r1, r2, a1, a2, iN1, iN2 = (self.weights[0], self.weights[1],
-                                    self.weights[2], self.weights[3],
-                                    self.weights[4], self.weights[5])
-        _1 = r1 * x[:, 0] * (1 - iN1 * x[:, 0]) - a1 * x[:, 0] * x[:, 1]
-        _2 = r2 * x[:, 1] * (1 - iN2 * x[:, 1]) - a2 * x[:, 0] * x[:, 1]
 
-        _ = torch.stack((_1, _2), dim=-1)
+        _ = self.d_f(x)
 
-        step_out = x + self.h * torch.clamp(_, -1e5, 1e5)
+        step_out = x + torch.clamp(_, -1e5, 1e5)
         return step_out, step_out
 
-    def forward(self, init):
+    def forward(self, init, steps=None):
         state = init
         outputs = []
-        for step in range(self.steps):
+
+        steps = self.steps if steps is None else steps
+
+        for step in range(steps):
             step_out, state = self.step_do(state)
             outputs.append(step_out)
 
@@ -70,11 +71,11 @@ if __name__ == '__main__':
         if i != 0:
             Y[0, int(i / h) - 1] += series[i]
 
-    X = torch.tensor(X)
-    Y = torch.tensor(Y)
+    X = torch.tensor(X, dtype=torch.float32)
+    Y = torch.tensor(Y, dtype=torch.float32)
 
-    model = ODE_RNN(steps, h)
-    optimizer = Adam(model.parameters(), lr=1e-4)
+    model = ODE_RNN(steps, input_size=2, hidden_size=64)
+    optimizer = Adam(model.parameters(), lr=1e-3)
 
     for epoch in range(10000):
         outputs = model(X)
@@ -96,4 +97,4 @@ if __name__ == '__main__':
 
     plot.plot(list(series.keys()), [i[0] for i in series.values()], 'o', color='blue')
     plot.plot(list(series.keys()), [i[1] for i in series.values()], 'o', color='green')
-    plot.savefig('test.png')
+    plot.savefig('ode_b.png')

@@ -5,37 +5,38 @@ import numpy as np
 import matplotlib.pyplot as plot
 
 
-class ODE_LSTM(nn.Module):
+class ODE_RNN(nn.Module):
 
-    def __init__(self, steps, input_size, hidden_size, num_layers):
+    def __init__(self, steps, h):
         super().__init__()
         self.steps = steps
+        self.h = h
 
-        self.en = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
-                          num_layers=num_layers, batch_first=True)
-        self.de = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
-                          num_layers=num_layers, batch_first=True)
+        self.weights = nn.Parameter(
+            torch.tensor([0.1, 0.1, 0.001, 0.001, 0.001, 0.001], dtype=torch.float32)
+            , requires_grad=True)
 
-        self.o_net = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, input_size)
-        )
+    def step_do(self, state):
+        x = state
+        r1, r2, a1, a2, iN1, iN2 = (self.weights[0], self.weights[1],
+                                    self.weights[2], self.weights[3],
+                                    self.weights[4], self.weights[5])
+        _1 = r1 * x[:, 0] * (1 - iN1 * x[:, 0]) - a1 * x[:, 0] * x[:, 1]
+        _2 = r2 * x[:, 1] * (1 - iN2 * x[:, 1]) - a2 * x[:, 0] * x[:, 1]
 
-    def forward(self, init, steps=None):
-        steps = self.steps if steps is None else steps
+        _ = torch.stack((_1, _2), dim=-1)
 
-        zeros = torch.zeros(init.shape[0],
-                            steps,
-                            init.shape[1],
-                            dtype=init.dtype)
+        step_out = x + self.h * torch.clamp(_, -1e5, 1e5)
+        return step_out, step_out
 
-        _, init_state = self.en(init.unsqueeze(1))
+    def forward(self, init):
+        state = init
+        outputs = []
+        for step in range(self.steps):
+            step_out, state = self.step_do(state)
+            outputs.append(step_out)
 
-        outputs, _ = self.de(zeros, init_state)
-
-        # steps
-        outputs = self.o_net(outputs)
+        outputs = torch.stack(outputs, dim=1)
 
         return outputs
 
@@ -69,13 +70,13 @@ if __name__ == '__main__':
         if i != 0:
             Y[0, int(i / h) - 1] += series[i]
 
-    X = torch.tensor(X, dtype=torch.float32)
-    Y = torch.tensor(Y, dtype=torch.float32)
+    X = torch.tensor(X)
+    Y = torch.tensor(Y)
 
-    model = ODE_LSTM(steps, input_size=2, hidden_size=64, num_layers=2)
+    model = ODE_RNN(steps, h)
     optimizer = Adam(model.parameters(), lr=1e-4)
 
-    for epoch in range(300):
+    for epoch in range(10000):
         outputs = model(X)
         loss = ode_loss(Y, outputs)
         loss.backward()
@@ -95,4 +96,4 @@ if __name__ == '__main__':
 
     plot.plot(list(series.keys()), [i[0] for i in series.values()], 'o', color='blue')
     plot.plot(list(series.keys()), [i[1] for i in series.values()], 'o', color='green')
-    plot.savefig('test.png')
+    plot.savefig('ode_a.png')
